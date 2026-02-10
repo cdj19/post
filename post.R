@@ -42,7 +42,29 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
   } else{wi <- weights}
   k <- length(model.matrix(model)[1,])
   n.q <- length(quantiles)
-  
+
+  if (!is.null(x1name) && grepl("(", x1name, fixed = TRUE)) {
+    stop(sprintf("x1name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x1name))
+  }
+  if (!is.null(x2name) && grepl("(", x2name, fixed = TRUE)) {
+    stop(sprintf("x2name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x2name))
+  }
+
+  if (!is.null(x1name) && is.factor(model$model[[x1name]])) {
+    x1vals <- as.character(x1vals)
+    if (!all(x1vals %in% levels(model$model[[x1name]]))) {
+      stop(sprintf("x1vals must be valid levels of factor '%s': %s",
+                   x1name, paste(levels(model$model[[x1name]]), collapse = ", ")))
+    }
+  }
+  if (!is.null(x2name) && is.factor(model$model[[x2name]])) {
+    x2vals <- as.character(x2vals)
+    if (!all(x2vals %in% levels(model$model[[x2name]]))) {
+      stop(sprintf("x2vals must be valid levels of factor '%s': %s",
+                   x2name, paste(levels(model$model[[x2name]]), collapse = ", ")))
+    }
+  }
+
   if (is.null(x1name)){
     X <- array(NA, c(n.obs,k))
     newdata <- data.frame(model$model)
@@ -51,7 +73,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
         newdata[ ,names(holds)[i]] <- holds[[i]]
       }
     }
-    X <- aperm(model.matrix(lm(formula(model), data=newdata)))
+    X <- aperm(model.matrix(terms(model), data=newdata, xlev=model$xlevels))
     l1 <- array(NA, c(nrow(sims@coef),1))
     l1[,1] <- apply(link(sims@coef %*% X), 1, function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(1,n.q+1))
@@ -83,7 +105,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
         }
       }
       newdata[ ,x1name] <- x1vals[i]
-      X[ , ,i] <- model.matrix(lm(formula(model), data=newdata))
+      X[ , ,i] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
     }
     
     X <- aperm(X, c(2,1,3))
@@ -126,7 +148,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
         }
         newdata[ ,x1name] <- x1vals[i]
         newdata[ ,x2name] <- x2vals[j]
-        X[ , ,i,j] <- model.matrix(lm(formula(model), data=newdata))
+        X[ , ,i,j] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       }
     }
     
@@ -178,7 +200,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
   else if (model$method=="cloglog"){link <- function(x){1-exp(-exp(x))}}
   else {stop("Link function is not supported")}
   
-  k <- length(model.matrix(polr(getCall(model)$formula, model$model))[1,])
+  k <- ncol(model.matrix(terms(model), data=model$model, xlev=model$xlevels))
   n.q <- length(quantiles)
   n.y <- length(levels(model$model[,1]))
   n.z <- length(model$zeta)
@@ -187,9 +209,31 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
   tau[,2:(ncol(tau)-1)] <- sims@zeta[,1:n.z]
   tau[,ncol(tau)] <- Inf
   beta <- sims@coef
-  
+
+  if (!is.null(x1name) && grepl("(", x1name, fixed = TRUE)) {
+    stop(sprintf("x1name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x1name))
+  }
+  if (!is.null(x2name) && grepl("(", x2name, fixed = TRUE)) {
+    stop(sprintf("x2name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x2name))
+  }
+
+  if (!is.null(x1name) && is.factor(model$model[[x1name]])) {
+    x1vals <- as.character(x1vals)
+    if (!all(x1vals %in% levels(model$model[[x1name]]))) {
+      stop(sprintf("x1vals must be valid levels of factor '%s': %s",
+                   x1name, paste(levels(model$model[[x1name]]), collapse = ", ")))
+    }
+  }
+  if (!is.null(x2name) && is.factor(model$model[[x2name]])) {
+    x2vals <- as.character(x2vals)
+    if (!all(x2vals %in% levels(model$model[[x2name]]))) {
+      stop(sprintf("x2vals must be valid levels of factor '%s': %s",
+                   x2name, paste(levels(model$model[[x2name]]), collapse = ", ")))
+    }
+  }
+
   if (is.null(cut)){
-    
+
     if (is.null(x1name)){
       
       X_temp <- array(NA, c(n.obs,k))
@@ -201,7 +245,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           newdata[ ,names(holds)[j]] <- holds[[j]]
         }
       }
-      X_temp[ , ] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+      X_temp[ , ] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       X[ , ] <- X_temp[,-1]
       X <- aperm(X)
       
@@ -245,7 +289,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           }
         }
         newdata[ ,x1name] <- x1vals[i]
-        X_temp[ , ,i] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+        X_temp[ , ,i] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
         X[ , ,i] <- X_temp[,-1,i]
       }
       
@@ -299,7 +343,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           }
           newdata[ ,x1name] <- x1vals[i]
           newdata[ ,x2name] <- x2vals[j]
-          X_temp[ , ,i,j] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+          X_temp[ , ,i,j] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
           X[ , ,i,j] <- X_temp[,-1,i,j]
         }
       }
@@ -362,7 +406,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           newdata[ ,names(holds)[j]] <- holds[[j]]
         }
       }
-      X_temp[ , ] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+      X_temp[ , ] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       X[ , ] <- X_temp[,-1]
       X <- aperm(X)
       
@@ -399,7 +443,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           }
         }
         newdata[ ,x1name] <- x1vals[i]
-        X_temp[ , ,i] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+        X_temp[ , ,i] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
         X[ , ,i] <- X_temp[,-1,i]
       }
       
@@ -447,7 +491,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
           }
           newdata[ ,x1name] <- x1vals[i]
           newdata[ ,x2name] <- x2vals[j]
-          X_temp[ , ,i,j] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
+          X_temp[ , ,i,j] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
           X[ , ,i,j] <- X_temp[,-1,i,j]
         }
       }
