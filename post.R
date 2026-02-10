@@ -109,7 +109,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     }
     
     X <- aperm(X, c(2,1,3))
-    l1 <- apply(apply(X, c(2,3), function(x) link(sims@coef %*% x)), c(1,3), function(x) weighted.mean(x, wi))
+    l1 <- apply(apply(X, c(2,3), function(x) drop(link(sims@coef %*% x))), c(1,3), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1))
     l2[1:n.x1,1] <- apply(l1, 2, mean)
     l2[1:n.x1,2:(n.q+1)] <- aperm(apply(l1, 2, function(x) quantile(x, probs=quantiles)))
@@ -153,7 +153,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     }
     
     X <- aperm(X, c(2,1,3,4))
-    l1 <- apply(apply(X, c(2,3,4), function(x) link(sims@coef %*% x)), c(1,3,4), function(x) weighted.mean(x, wi))
+    l1 <- apply(apply(X, c(2,3,4), function(x) drop(link(sims@coef %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
     l2[1:n.x1,1,1:n.x2] <- apply(l1,c(2,3),mean)
     l2[1:n.x1,2:(n.q+1),1:n.x2] <- aperm(apply(l1, c(2,3), function(x) quantile(x, probs=quantiles)), c(2,1,3))
@@ -296,7 +296,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       l1 <- array(NA, c(n.sims, n.obs, n.x1, n.y))
       X <- aperm(X, c(2,1,3))
       for (z in 1:n.y){
-        l1[,,,z] <- apply(X, c(2,3), function(x) (link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
+        l1[,,,z] <- apply(X, c(2,3), function(x) drop(link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
       }
       
       l2 <- apply(l1, c(1,3,4), function(x) weighted.mean(x, wi))
@@ -352,7 +352,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       
       l1 <- array(NA, c(n.sims, n.obs, n.x1, n.x2, n.y))
       for (z in 1:n.y){
-        l1[,,,,z] <- apply(X, c(2,3,4), function(x) (link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
+        l1[,,,,z] <- apply(X, c(2,3,4), function(x) drop(link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
       }
       
       l2 <- apply(l1, c(1,3,4,5), function(x) weighted.mean(x, wi))
@@ -448,7 +448,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3))
-      l1 <- apply(apply(X, c(2,3), function(x) link(-tau[,cut+1] + beta %*% x)), 
+      l1 <- apply(apply(X, c(2,3), function(x) drop(link(-tau[,cut+1] + beta %*% x))), 
                   c(1,3), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1))
       for (i in 1:n.x1){
@@ -497,7 +497,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3,4))
-      l1 <- apply(apply(X, c(2,3,4), function(x) link(-tau[,cut+1] + beta %*% x)), c(1,3,4), function(x) weighted.mean(x, wi))
+      l1 <- apply(apply(X, c(2,3,4), function(x) drop(link(-tau[,cut+1] + beta %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
       for (j in 1:n.x2){
         for (i in 1:n.x1){
