@@ -120,8 +120,8 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
       for (i in 1:n.x1){
         newdata <- data.frame(model$model)
         if (!is.null(holds)){
-          for (k in 1:length(holds)){
-            newdata[ ,names(holds)[k]] <- holds[[k]]
+          for (h in 1:length(holds)){
+            newdata[ ,names(holds)[h]] <- holds[[h]]
           }
         }
         newdata[ ,x1name] <- x1vals[i]
@@ -293,8 +293,8 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         for (i in 1:(n.x1)){
           newdata <- data.frame(model$model)
           if (!is.null(holds)){
-            for (k in 1:length(holds)){
-              newdata[ ,names(holds)[k]] <- holds[[k]]
+            for (h in 1:length(holds)){
+              newdata[ ,names(holds)[h]] <- holds[[h]]
             }
           }
           newdata[ ,x1name] <- x1vals[i]
@@ -313,14 +313,14 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       
       l2 <- apply(l1, c(1,3,4,5), function(x) weighted.mean(x, wi))
       l3 <- array(NA, c(n.x1+1, n.q+1, n.x2, n.y))
-      for (k in 1:n.y){
+      for (m in 1:n.y){
         for (j in 1:n.x2){
           for (i in 1:n.x1){
-            l3[i,1,j,k] <- mean(l2[,i,j,k])
-            l3[i,2:(n.q+1),j,k] <- quantile(l2[,i,j,k], probs=quantiles)
+            l3[i,1,j,m] <- mean(l2[,i,j,m])
+            l3[i,2:(n.q+1),j,m] <- quantile(l2[,i,j,m], probs=quantiles)
           }
-          l3[n.x1+1,1,j,k] <- mean(l2[,n.x1,j,k] - l2[,1,j,k])
-          l3[n.x1+1,2:(n.q+1),j,k] <- quantile(l2[,n.x1,j,k] - l2[,1,j,k], probs=quantiles)
+          l3[n.x1+1,1,j,m] <- mean(l2[,n.x1,j,m] - l2[,1,j,m])
+          l3[n.x1+1,2:(n.q+1),j,m] <- quantile(l2[,n.x1,j,m] - l2[,1,j,m], probs=quantiles)
         }
       }
       dimnames(l3) <- list(paste(c(rep(paste(x1name," ="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
@@ -441,8 +441,8 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         for (i in 1:n.x1){
           newdata <- data.frame(model$model)
           if (!is.null(holds)){
-            for (k in 1:length(holds)){
-              newdata[ ,names(holds)[k]] <- holds[[k]]
+            for (h in 1:length(holds)){
+              newdata[ ,names(holds)[h]] <- holds[[h]]
             }
           }
           newdata[ ,x1name] <- x1vals[i]
