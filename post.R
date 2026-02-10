@@ -21,6 +21,35 @@ setClass("post",
 )
 
 
+
+.post_assign_value <- function(newdata, varname, value){
+  target <- varname
+  if (!(target %in% names(newdata))){
+    factor_target <- paste0("factor(", varname, ")")
+    if (factor_target %in% names(newdata)){
+      target <- factor_target
+    } else {
+      stop(paste("Variable", varname, "was not found in model data"))
+    }
+  }
+  
+  n <- nrow(newdata)
+  current <- newdata[[target]]
+  if (is.factor(current)){
+    newdata[[target]] <- factor(rep_len(as.character(value), n), levels = levels(current))
+  } else {
+    newdata[[target]] <- rep_len(value, n)
+  }
+  newdata
+}
+
+.post_apply_holds <- function(newdata, holds){
+  for (i in 1:length(holds)){
+    newdata <- .post_assign_value(newdata, names(holds)[i], holds[[i]])
+  }
+  newdata
+}
+
 post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
                      n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2){
   
@@ -28,15 +57,18 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
   
   sims <- postSim(model, n.sims=n.sims)
   
-  if (family(model)[2]=="identity"){link <- identity} 
-  else if (family(model)[2]=="probit"){link <- pnorm}
-  else if (family(model)[2]=="logit"){link <- plogis}
-  else if (family(model)[2]=="log"){link <- exp}
-  else if (family(model)[2]=="cloglog"){link <- function(x){1-exp(-exp(x))}}
+  model.link <- family(model)$link
+  if (model.link=="identity"){link <- identity} 
+  else if (model.link=="probit"){link <- pnorm}
+  else if (model.link=="logit"){link <- plogis}
+  else if (model.link=="log"){link <- exp}
+  else if (model.link=="cloglog"){link <- function(x){1-exp(-exp(x))}}
   else {stop("Link function is not supported")}
   
-  if (is.null(weights)){wi <- c(rep(1, length(model$model[,1])))} else{wi <- weights}
-  n.obs <- length(model.matrix(model)[,1])
+  n.obs <- nrow(model.matrix(model))
+  if (is.null(weights)){wi <- rep(1, n.obs)} else if (length(weights) != n.obs){
+    stop("weights must have the same length as the estimation sample")
+  } else{wi <- weights}
   k <- length(model.matrix(model)[1,])
   n.q <- length(quantiles)
   
@@ -44,9 +76,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     X <- array(NA, c(n.obs,k))
     newdata <- data.frame(model$model)
     if (!is.null(holds)){
-      for (i in 1:length(holds)){
-        newdata[ ,names(holds)[i]] <- as.numeric(holds[i])
-      }
+      newdata <- .post_apply_holds(newdata, holds)
     }
     X <- aperm(model.matrix(lm(formula(model), data=newdata)))
     l1 <- array(NA, c(nrow(sims@coef),1))
@@ -61,7 +91,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
                did=NULL,
                sims=l1, 
                model=class(model), 
-               link=family(model)[2], 
+               link=model.link, 
                quantiles=quantiles, 
                call=call)
     return(ans)
@@ -75,11 +105,9 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     for (i in 1:(n.x1)){
       newdata <- data.frame(model$model)
       if (!is.null(holds)){
-        for (j in 1:length(holds)){
-          newdata[ ,names(holds)[j]] <- as.numeric(holds[j])
-        }
+        newdata <- .post_apply_holds(newdata, holds)
       }
-      newdata[ ,x1name] <- x1vals[i]
+      newdata <- .post_assign_value(newdata, x1name, x1vals[i])
       X[ , ,i] <- model.matrix(lm(formula(model), data=newdata))
     }
     
@@ -101,7 +129,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
                did=NULL, 
                sims=l1, 
                model=class(model), 
-               link=family(model)[2], 
+               link=model.link, 
                quantiles=quantiles, 
                call=call)
     return(ans)
@@ -117,12 +145,10 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
       for (i in 1:n.x1){
         newdata <- data.frame(model$model)
         if (!is.null(holds)){
-          for (k in 1:length(holds)){
-            newdata[ ,names(holds)[k]] <- as.numeric(holds[k])
-          }
+          newdata <- .post_apply_holds(newdata, holds)
         }
-        newdata[ ,x1name] <- x1vals[i]
-        newdata[ ,x2name] <- x2vals[j]
+        newdata <- .post_assign_value(newdata, x1name, x1vals[i])
+        newdata <- .post_assign_value(newdata, x2name, x2vals[j])
         X[ , ,i,j] <- model.matrix(lm(formula(model), data=newdata))
       }
     }
@@ -150,7 +176,7 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
                did=round(l3, digits=digits), 
                sims=l1, 
                model=class(model), 
-               link=family(model)[2], 
+               link=model.link, 
                quantiles=quantiles, 
                call=call)
     return(ans)
@@ -165,14 +191,16 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
   
   sims <- suppressMessages(postSim(model, n.sims=n.sims))
   
-  if (is.null(weights)){wi <- c(rep(1, length(model$model[,1])))} else{wi <- weights}
+  n.obs <- length(model$model[,1])
+  if (is.null(weights)){wi <- rep(1, n.obs)} else if (length(weights) != n.obs){
+    stop("weights must have the same length as the estimation sample")
+  } else{wi <- weights}
   
   if (model$method=="probit"){link <- pnorm}
   else if (model$method=="logistic"){link <- plogis}
   else if (model$method=="cloglog"){link <- function(x){1-exp(-exp(x))}}
   else {stop("Link function is not supported")}
   
-  n.obs <- length(model$model[,1])
   k <- length(model.matrix(polr(getCall(model)$formula, model$model))[1,])
   n.q <- length(quantiles)
   n.y <- length(levels(model$model[,1]))
@@ -192,9 +220,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       
       newdata <- data.frame(model$model)
       if (!is.null(holds)){
-        for (j in 1:length(holds)){
-          newdata[ ,names(holds)[j]] <- as.numeric(holds[j])
-        }
+        newdata <- .post_apply_holds(newdata, holds)
       }
       X_temp[ , ] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
       X[ , ] <- X_temp[,-1]
@@ -235,11 +261,9 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       for (i in 1:(n.x1)){
         newdata <- data.frame(model$model)
         if (!is.null(holds)){
-          for (j in 1:length(holds)){
-            newdata[ ,names(holds)[j]] <- as.numeric(holds[j])
-          }
+          newdata <- .post_apply_holds(newdata, holds)
         }
-        newdata[ ,x1name] <- x1vals[i]
+        newdata <- .post_assign_value(newdata, x1name, x1vals[i])
         X_temp[ , ,i] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
         X[ , ,i] <- X_temp[,-1,i]
       }
@@ -288,12 +312,10 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         for (i in 1:(n.x1)){
           newdata <- data.frame(model$model)
           if (!is.null(holds)){
-            for (k in 1:length(holds)){
-              newdata[ ,names(holds)[k]] <- as.numeric(holds[k])
-            }
+            newdata <- .post_apply_holds(newdata, holds)
           }
-          newdata[ ,x1name] <- x1vals[i]
-          newdata[ ,x2name] <- x2vals[j]
+          newdata <- .post_assign_value(newdata, x1name, x1vals[i])
+          newdata <- .post_assign_value(newdata, x2name, x2vals[j])
           X_temp[ , ,i,j] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
           X[ , ,i,j] <- X_temp[,-1,i,j]
         }
@@ -353,9 +375,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       
       newdata <- data.frame(model$model)
       if (!is.null(holds)){
-        for (j in 1:length(holds)){
-          newdata[ ,names(holds)[j]] <- as.numeric(holds[j])
-        }
+        newdata <- .post_apply_holds(newdata, holds)
       }
       X_temp[ , ] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
       X[ , ] <- X_temp[,-1]
@@ -389,11 +409,9 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       for (i in 1:(n.x1)){
         newdata <- data.frame(model$model)
         if (!is.null(holds)){
-          for (j in 1:length(holds)){
-            newdata[ ,names(holds)[j]] <- as.numeric(holds[j])
-          }
+          newdata <- .post_apply_holds(newdata, holds)
         }
-        newdata[ ,x1name] <- x1vals[i]
+        newdata <- .post_assign_value(newdata, x1name, x1vals[i])
         X_temp[ , ,i] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
         X[ , ,i] <- X_temp[,-1,i]
       }
@@ -436,12 +454,10 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         for (i in 1:n.x1){
           newdata <- data.frame(model$model)
           if (!is.null(holds)){
-            for (k in 1:length(holds)){
-              newdata[ ,names(holds)[k]] <- as.numeric(holds[k])
-            }
+            newdata <- .post_apply_holds(newdata, holds)
           }
-          newdata[ ,x1name] <- x1vals[i]
-          newdata[ ,x2name] <- x2vals[j]
+          newdata <- .post_assign_value(newdata, x1name, x1vals[i])
+          newdata <- .post_assign_value(newdata, x2name, x2vals[j])
           X_temp[ , ,i,j] <- suppressWarnings(model.matrix(polr(getCall(model)$formula, data=newdata)))
           X[ , ,i,j] <- X_temp[,-1,i,j]
         }
