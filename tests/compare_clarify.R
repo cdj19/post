@@ -839,6 +839,47 @@ h4_results <- NULL
   }
 }
 
+# H5: lm with dist="t" in post() vs clarify default t-distribution
+# postSim dist="t" uses the standard MVt: mu + Z/sqrt(W).  clarify's rmvt
+# divides (mu + Z) / sqrt(W), scaling the mean by the chi-squared factor.
+# This non-standard implementation inflates variance proportional to mu^2,
+# so H5 is scored separately like H4.
+h5_results <- NULL
+{
+  cat(sprintf("  %-4s %-45s ", "H5", "lm dist='t' vs clarify default t"))
+  .h5_ok <- tryCatch({
+    fit_h5 <- lm(mpg ~ wt + hp, data = d)
+
+    set.seed(SEED)
+    p_h5 <- post(fit_h5, x1name = "wt", x1vals = c(2, 4),
+                 n.sims = N_SIMS, digits = 10, dist = "t")
+
+    set.seed(SEED)
+    # Clarify with DEFAULT dist (t-distribution)
+    s_h5 <- sim(fit_h5, n = N_SIMS)
+    fn_h5 <- make_glm_ova_fn(fit_h5, x1name = "wt", x1vals = c(2, 4),
+                              link_fn = identity)
+    c_h5  <- sim_apply(s_h5, fn_h5, verbose = FALSE)
+    cm_h5 <- as.matrix(c_h5)
+
+    tmp <- list()
+    for (i in 1:2) {
+      cname <- paste0("wt=", c(2, 4)[i])
+      tmp[[i]] <- compare_sims(
+        p_h5@sims[, i], cm_h5[, cname], "H5*", cname, wider = TRUE)
+    }
+    tmp
+  }, error = function(e) {
+    cat(sprintf("ERROR: %s\n", conditionMessage(e)))
+    error_count <<- error_count + 1L
+    NULL
+  })
+  if (!is.null(.h5_ok)) {
+    h5_results <- do.call(rbind, .h5_ok)
+    cat("INFO (expected divergence)\n")
+  }
+}
+
 
 # ================================================================
 # Section 3: Benchmark Timing
@@ -984,17 +1025,22 @@ for (i in seq_len(nrow(all_df))) {
 
 add("")
 
-# H4 expected divergence section
+# H4/H5 expected divergence section
 h4_df <- h4_results
-if (!is.null(h4_df) && nrow(h4_df) > 0) {
-  add("EXPECTED DIVERGENCE: H4 (lm with default dist)")
-  add("postSim uses chi-squared/MVN; clarify default uses multivariate t.")
+h5_df <- h5_results
+div_df <- rbind(h4_df, h5_df)
+if (!is.null(div_df) && nrow(div_df) > 0) {
+  add("EXPECTED DIVERGENCE: H4 & H5 (lm t-distribution differences)")
+  add("H4: postSim default (chi-sq/MVN) vs clarify default (non-standard MVt)")
+  add("H5: postSim dist='t' (standard MVt) vs clarify default (non-standard MVt)")
+  add("clarify's rmvt divides (mu+Z)/sqrt(W) instead of mu+Z/sqrt(W),")
+  add("inflating variance proportional to mu^2.")
   add("--------------------------------------------------------------")
   add("%-5s %-38s %-6s %10s %10s %8s",
       "ID", "Quantity", "Metric", "post", "clarify", "d/SE")
   add("--------------------------------------------------------------")
-  for (i in seq_len(nrow(h4_df))) {
-    r <- h4_df[i, ]
+  for (i in seq_len(nrow(div_df))) {
+    r <- div_df[i, ]
     add("%-5s %-38s %-6s %10.6f %10.6f %8.4f",
         r$label, r$quantity, r$metric, r$post_val, r$clarify_val,
         r$diff_ratio)
@@ -1022,6 +1068,7 @@ add("Passed:                     %d", pass_count)
 add("Failed:                     %d", fail_count)
 add("Errors (test did not run):  %d", error_count)
 add("H4 (expected divergence):   scored separately above")
+add("H5 (expected divergence):   scored separately above")
 add("================================================================")
 
 writeLines(lines, report_path)

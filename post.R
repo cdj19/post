@@ -1,8 +1,9 @@
 ####### post #######
 
-setGeneric("post", 
+setGeneric("post",
            function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
-                    n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2){
+                    n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
+                    dist=c("normal","t")){
              standardGeneric("post")
            }
 )
@@ -22,11 +23,13 @@ setClass("post",
 
 
 post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
-                     n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2){
-  
+                     n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
+                     dist=c("normal","t")){
+
   call <- match.call()
-  
-  sims <- postSim(model, n.sims=n.sims)
+  dist <- match.arg(dist)
+
+  sims <- postSim(model, n.sims=n.sims, dist=dist)
   
   model.link <- family(model)$link
   if (model.link=="identity"){link <- identity} 
@@ -213,11 +216,13 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
 
 
 post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
-         n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2){
-  
+         n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
+         dist=c("normal","t")){
+
   call <- match.call()
-  
-  sims <- suppressMessages(postSim(model, n.sims=n.sims))
+  dist <- match.arg(dist)
+
+  sims <- suppressMessages(postSim(model, n.sims=n.sims, dist=dist))
   
   n.obs <- length(model$model[,1])
   if (is.null(weights)){wi <- rep(1, n.obs)} else if (length(weights) != n.obs){
