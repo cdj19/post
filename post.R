@@ -72,6 +72,24 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     }
   }
 
+  if (!is.null(holds)) {
+    bad <- setdiff(names(holds), names(model$model))
+    if (length(bad) > 0) {
+      stop(sprintf("holds variable(s) not found in model: %s",
+                   paste(bad, collapse = ", ")))
+    }
+    for (i in seq_along(holds)) {
+      nm <- names(holds)[i]
+      if (is.factor(model$model[[nm]])) {
+        val <- as.character(holds[[i]])
+        if (!val %in% levels(model$model[[nm]])) {
+          stop(sprintf("holds value '%s' is not a valid level of factor '%s': %s",
+                       val, nm, paste(levels(model$model[[nm]]), collapse = ", ")))
+        }
+      }
+    }
+  }
+
   if (is.null(x1name)){
     X <- array(NA, c(n.obs,k))
     newdata <- data.frame(model$model)
@@ -119,7 +137,9 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     l1 <- apply(apply(X, c(2,3), function(x) drop(link(sims@coef %*% x))), c(1,3), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1))
     l2[1:n.x1,1] <- apply(l1, 2, mean)
-    l2[1:n.x1,2:(n.q+1)] <- aperm(apply(l1, 2, function(x) quantile(x, probs=quantiles)))
+    q_arr <- apply(l1, 2, function(x) quantile(x, probs=quantiles))
+    if (n.q == 1) q_arr <- array(q_arr, dim = c(1, length(q_arr)))
+    l2[1:n.x1,2:(n.q+1)] <- aperm(q_arr)
     
     l2[nrow(l2),1] <- mean(l1[ ,n.x1] - l1[ ,1])
     l2[nrow(l2),2:(n.q+1)] <- quantile(l1[ ,n.x1] - l1[ ,1], probs=quantiles)
@@ -163,7 +183,9 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
     l1 <- apply(apply(X, c(2,3,4), function(x) drop(link(sims@coef %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
     l2[1:n.x1,1,1:n.x2] <- apply(l1,c(2,3),mean)
-    l2[1:n.x1,2:(n.q+1),1:n.x2] <- aperm(apply(l1, c(2,3), function(x) quantile(x, probs=quantiles)), c(2,1,3))
+    q_arr <- apply(l1, c(2,3), function(x) quantile(x, probs=quantiles))
+    if (n.q == 1) dim(q_arr) <- c(1, dim(q_arr))
+    l2[1:n.x1,2:(n.q+1),1:n.x2] <- aperm(q_arr, c(2,1,3))
     l2[nrow(l2),1,1:n.x2] <- apply(l1[ ,n.x1,1:n.x2] - l1[ ,1,1:n.x2], 2, mean)
     l2[nrow(l2),2:(n.q+1),1:n.x2] <- apply(l1[ ,n.x1,1:n.x2] - l1[ ,1,1:n.x2], 2, function(x) quantile(x, probs=quantiles))
     dimnames(l2) <- list(paste(c(rep(paste(x1name,"="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
@@ -246,6 +268,24 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
     }
   }
 
+  if (!is.null(holds)) {
+    bad <- setdiff(names(holds), names(model$model))
+    if (length(bad) > 0) {
+      stop(sprintf("holds variable(s) not found in model: %s",
+                   paste(bad, collapse = ", ")))
+    }
+    for (i in seq_along(holds)) {
+      nm <- names(holds)[i]
+      if (is.factor(model$model[[nm]])) {
+        val <- as.character(holds[[i]])
+        if (!val %in% levels(model$model[[nm]])) {
+          stop(sprintf("holds value '%s' is not a valid level of factor '%s': %s",
+                       val, nm, paste(levels(model$model[[nm]]), collapse = ", ")))
+        }
+      }
+    }
+  }
+
   if (is.null(cut)){
 
     if (is.null(x1name)){
@@ -274,7 +314,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         l3[i,1] <- mean(l2[,i])
         l3[i,2:(n.q+1)] <- quantile(l2[,i], probs=quantiles)
       }
-      rownames(l3) <- paste(c(rep("Y =",n.y)), c(1:n.y))
+      rownames(l3) <- paste("Y =", levels(model$model[,1]))
       colnames(l3) <- c("mean",quantiles)
       
       ans <- new("post", 
@@ -325,8 +365,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       dimnames(l3) <- list(paste(c(rep(paste(x1name,"="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
                            c("mean",quantiles),
-                           paste(c(rep("Y =",length(levels(model$model[,1])))),
-                                 c(1:length(levels(model$model[,1]))))) 
+                           paste("Y =", levels(model$model[,1])))
       
       ans <- new("post", 
                  est=round(l3, digits=digits), 
@@ -384,7 +423,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       dimnames(l3) <- list(paste(c(rep(paste(x1name," ="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
                            c("mean",quantiles),
                            paste(c(rep(paste(x2name,"="),n.x2)),x2vals),
-                           paste(c(rep("Y =",n.y)), c(1:n.y))) 
+                           paste("Y =", levels(model$model[,1])))
       
       if (is.null(did)){did <- c(x2vals[1],x2vals[n.x2])} else{did <- did}
       l4 <- array(NA, c(n.y,n.q+1))
@@ -392,8 +431,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         l4[i,1] <- mean((l2[ ,n.x1,match(did[2],x2vals),i] - l2[ ,1,match(did[2],x2vals),i]) -  (l2[ ,n.x1,match(did[1],x2vals),i] - l2[ ,1,match(did[1],x2vals),i]))
         l4[i,2:(n.q+1)] <- quantile((l2[ ,n.x1,match(did[2],x2vals),i] - l2[ ,1,match(did[2],x2vals),i]) -  (l2[ ,n.x1,match(did[1],x2vals),i] - l2[ ,1,match(did[1],x2vals),i]), probs=quantiles)
       }
-      yvals <- 1:n.y
-      dimnames(l4) <- list(paste(c(rep(paste("Y","="),n.y)),yvals),c("mean",quantiles)) 
+      dimnames(l4) <- list(paste("Y =", levels(model$model[,1])),c("mean",quantiles))
       
       ans <- new("post", 
                  est=round(l3, digits=digits), 
@@ -424,7 +462,8 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       X[ , ] <- X_temp[,-1]
       X <- aperm(X)
       
-      l1 <- apply(link(-tau[,cut+1] + beta %*% X), 1, function(x) weighted.mean(x, wi))
+      l1 <- apply(1 - link(tau[,cut+1] - beta %*% X), 1, function(x) weighted.mean(x, wi))
+      l1 <- array(l1, dim = c(length(l1), 1))
       l2 <- array(NA, c(1,n.q+1))
       l2[1,1] <- mean(l1)
       l2[1,2:(n.q+1)] <- quantile(l1, probs=quantiles)
@@ -462,7 +501,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3))
-      l1 <- apply(apply(X, c(2,3), function(x) drop(link(-tau[,cut+1] + beta %*% x))), 
+      l1 <- apply(apply(X, c(2,3), function(x) drop(1 - link(tau[,cut+1] - beta %*% x))),
                   c(1,3), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1))
       for (i in 1:n.x1){
@@ -511,7 +550,7 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3,4))
-      l1 <- apply(apply(X, c(2,3,4), function(x) drop(link(-tau[,cut+1] + beta %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
+      l1 <- apply(apply(X, c(2,3,4), function(x) drop(1 - link(tau[,cut+1] - beta %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
       for (j in 1:n.x2){
         for (i in 1:n.x1){
