@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Rscript:*)",
+      "Bash(where:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(\"/c/Program Files/R/R-4.5.2/bin/Rscript.exe\" -e \"testthat::test_dir\\(''C:/Users/cdj19/repos/post/tests/testthat'', reporter=''summary''\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.5.2/bin/Rscript.exe\" -e \"testthat::test_dir\\(''tests/testthat'', reporter=''summary''\\)\")",
+      "Bash(\"/c/Program Files/R/R-4.5.2/bin/Rscript.exe\" tests/testthat.R)",
+      "Bash(\"/c/Program Files/R/R-4.5.2/bin/Rscript.exe\" -e \"\nsetwd\\(''tests/testthat''\\)\nsource\\(''../../postSim.R''\\)\nsource\\(''../../post.R''\\)\n# Now run tests with source\\(\\) calls expected to find files in cwd — \n# we''ll just inline-run the test logic instead\nlibrary\\(testthat\\)\n\n# Test 1: holds preserves non-numeric types for glm models\ntest_that\\(''holds preserves non-numeric types for glm models'', {\n  d <- mtcars\n  d$am_f <- factor\\(ifelse\\(d$am == 1, ''manual'', ''auto''\\)\\)\n  fit <- glm\\(vs ~ am_f + wt, data = d, family = binomial\\(\\)\\)\n  set.seed\\(1\\)\n  res <- post\\(fit, holds = list\\(am_f = ''manual''\\), n.sims = 50, digits = 6\\)\n  expect_s4_class\\(res, ''post''\\)\n  expect_false\\(any\\(is.na\\(res@est\\)\\)\\)\n}\\)\n\n# Test 2: post rejects silently recycled glm weights\ntest_that\\(''post rejects silently recycled glm weights'', {\n  fit <- glm\\(vs ~ wt + hp, data = mtcars, family = binomial\\(\\)\\)\n  expect_error\\(\n    post\\(fit, weights = rep\\(1, 2\\), n.sims = 20\\),\n    ''weights must have the same length as the estimation sample''\n  \\)\n}\\)\n\n# Test 3: post rejects silently recycled polr weights\ntest_that\\(''post rejects silently recycled polr weights'', {\n  skip_if_not_installed\\(''MASS''\\)\n  d <- transform\\(mtcars, gear_f = ordered\\(gear\\)\\)\n  fit <- MASS::polr\\(gear_f ~ wt + hp, data = d, method = ''logistic''\\)\n  expect_error\\(\n    post\\(fit, weights = rep\\(1, 3\\), n.sims = 20\\),\n    ''weights must have the same length as the estimation sample''\n  \\)\n}\\)\n\")",
+      "Bash(\"/c/Program Files/R/R-4.5.2/bin/Rscript.exe\" tests/run_tests.R)"
+    ]
+  }
+}

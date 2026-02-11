@@ -43,6 +43,13 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
   k <- length(model.matrix(model)[1,])
   n.q <- length(quantiles)
 
+  if (!is.null(x1name) && !x1name %in% names(model$model)) {
+    stop(sprintf("x1name='%s' is not a variable in the model", x1name))
+  }
+  if (!is.null(x2name) && !x2name %in% names(model$model)) {
+    stop(sprintf("x2name='%s' is not a variable in the model", x2name))
+  }
+
   if (!is.null(x1name) && grepl("(", x1name, fixed = TRUE)) {
     stop(sprintf("x1name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x1name))
   }
@@ -209,6 +216,13 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
   tau[,2:(ncol(tau)-1)] <- sims@zeta[,1:n.z]
   tau[,ncol(tau)] <- Inf
   beta <- sims@coef
+
+  if (!is.null(x1name) && !x1name %in% names(model$model)) {
+    stop(sprintf("x1name='%s' is not a variable in the model", x1name))
+  }
+  if (!is.null(x2name) && !x2name %in% names(model$model)) {
+    stop(sprintf("x2name='%s' is not a variable in the model", x2name))
+  }
 
   if (!is.null(x1name) && grepl("(", x1name, fixed = TRUE)) {
     stop(sprintf("x1name='%s' appears to use an inline transformation. Define the variable in your data before fitting the model (e.g., data$x <- factor(x)).", x1name))

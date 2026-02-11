@@ -91,4 +91,23 @@ test_that("inline formula transformation in x1name gives clear error", {
   )
 })
 
+# Misspelled x1name produces informative error
+test_that("misspelled x1name produces error naming the variable", {
+  fit <- glm(vs ~ wt + hp, data = mtcars, family = binomial())
+  expect_error(
+    post(fit, x1name = "weight", x1vals = c(2, 4), n.sims = 20),
+    "x1name='weight' is not a variable in the model"
+  )
+})
+
+# Misspelled x2name produces informative error
+test_that("misspelled x2name produces error naming the variable", {
+  fit <- glm(vs ~ wt + hp, data = mtcars, family = binomial())
+  expect_error(
+    post(fit, x1name = "wt", x1vals = c(2, 4),
+         x2name = "horsepower", x2vals = c(100, 200), n.sims = 20),
+    "x2name='horsepower' is not a variable in the model"
+  )
+})
+
 cat("\nAll tests passed!\n")
