@@ -1057,4 +1057,270 @@ test_that("polr cloglog category probabilities sum to ~1", {
 })
 
 
+# ══════════════════════════════════════════════════════════════════════
+# Delta method tests
+# ══════════════════════════════════════════════════════════════════════
+
+# ── GLM Delta method ──────────────────────────────────────────────────
+
+test_that("lm delta: no x (marginal)", {
+  fit <- lm(mpg ~ wt + hp, data = d)
+  r <- post(fit, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_null(r@sims)
+  set.seed(1)
+  s <- post(fit, n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.05)
+})
+
+test_that("lm delta: x1 only", {
+  fit <- lm(mpg ~ wt + hp, data = d)
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(nrow(r@est), 3)
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.05)
+  expect_equal(r@est[3,1], s@est[3,1], tolerance = 0.05)
+})
+
+test_that("lm delta: x1 + x2", {
+  fit <- lm(mpg ~ wt + hp, data = d)
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1,1], s@est[1,1,1], tolerance = 0.05)
+})
+
+test_that("glm logit delta: x1 only", {
+  fit <- glm(vs ~ wt + hp, data = d, family = binomial())
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.05)
+  expect_equal(r@est[3,1], s@est[3,1], tolerance = 0.05)
+})
+
+test_that("glm probit delta: no x", {
+  skip_on_cran()
+  fit <- suppressWarnings(glm(vs ~ wt + hp, data = d, family = binomial(link = "probit")))
+  r <- post(fit, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("glm log delta: x1 only", {
+  fit <- glm(mpg ~ wt + hp, data = d, family = gaussian(link = "log"))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.1)
+})
+
+test_that("glm poisson delta: x1 + x2", {
+  fit <- glm(carb ~ wt + hp, data = d, family = poisson())
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+})
+
+test_that("glm cloglog delta: x1 only", {
+  skip_on_cran()
+  fit <- suppressWarnings(glm(vs ~ wt + hp, data = d, family = binomial(link = "cloglog")))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+# ── GLM Delta with factors, holds, weights ────────────────────────────
+
+test_that("glm delta: factor x1", {
+  fit <- glm(vs ~ am_f + wt, data = d, family = binomial())
+  r <- post(fit, x1name = "am_f", x1vals = c("auto", "manual"), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(nrow(r@est), 3)
+})
+
+test_that("glm delta: holds", {
+  fit <- glm(vs ~ wt + hp + am, data = d, family = binomial())
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), holds = list(am = 1),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("glm delta: weights", {
+  fit <- lm(mpg ~ wt + hp, data = d)
+  w <- runif(nrow(d))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), weights = w,
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("glm delta: factor interaction x1 + x2", {
+  fit <- suppressWarnings(glm(vs ~ am_f * wt, data = d, family = binomial()))
+  r <- post(fit, x1name = "am_f", x1vals = c("auto", "manual"), x2name = "wt", x2vals = c(2, 4),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+})
+
+# ── polr Delta method (no cut) ───────────────────────────────────────
+
+test_that("polr logistic delta: no x", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(nrow(r@est), 3)
+  prob_sum <- sum(r@est[, 1])
+  expect_equal(prob_sum, 1.0, tolerance = 1e-10)
+  set.seed(1)
+  s <- post(fit, n.sims = 10000, digits = 4)
+  for (j in 1:3) expect_equal(r@est[j,1], s@est[j,1], tolerance = 0.02)
+})
+
+test_that("polr logistic delta: x1 only", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(dim(r@est), c(3, 3, 3))
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1,1], s@est[1,1,1], tolerance = 0.02)
+  expect_equal(r@est[3,1,1], s@est[3,1,1], tolerance = 0.05)
+})
+
+test_that("polr logistic delta: x1 + x2", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+  expect_equal(dim(r@est), c(3, 3, 2, 3))
+  expect_equal(nrow(r@did), 3)
+})
+
+test_that("polr probit delta: no x", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "probit")
+  r <- post(fit, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  prob_sum <- sum(r@est[, 1])
+  expect_equal(prob_sum, 1.0, tolerance = 1e-10)
+})
+
+test_that("polr cloglog delta: x1 only", {
+  fit <- suppressWarnings(polr(gear_o ~ wt + hp, data = d, method = "cloglog"))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+# ── polr Delta method (with cut) ─────────────────────────────────────
+
+test_that("polr logistic delta: cut, no x", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, cut = 1, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(dim(r@est), c(1, 3))
+  set.seed(1)
+  s <- post(fit, cut = 1, n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.02)
+})
+
+test_that("polr logistic delta: cut, x1 only", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), cut = 1, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_equal(nrow(r@est), 3)
+  set.seed(1)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), cut = 1, n.sims = 10000, digits = 4)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.02)
+  expect_equal(r@est[3,1], s@est[3,1], tolerance = 0.05)
+})
+
+test_that("polr logistic delta: cut, x1 + x2", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            cut = 1, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+  expect_equal(dim(r@est), c(3, 3, 2))
+})
+
+test_that("polr probit delta: cut, x1 only", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "probit")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), cut = 2, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("polr cloglog delta: cut, x1 + x2", {
+  fit <- suppressWarnings(polr(gear_o ~ wt + hp, data = d, method = "cloglog"))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), x2name = "hp", x2vals = c(100, 200),
+            cut = 1, method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+  expect_false(any(is.na(r@did)))
+})
+
+# ── polr Delta with factors and holds ─────────────────────────────────
+
+test_that("polr delta: factor x1", {
+  fit <- suppressWarnings(polr(gear_o ~ am_f + wt + hp, data = d, method = "logistic"))
+  r <- post(fit, x1name = "am_f", x1vals = c("auto", "manual"), method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("polr delta: holds", {
+  fit <- suppressWarnings(polr(gear_o ~ am_f + wt + hp, data = d, method = "logistic"))
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), holds = list(am_f = "manual"),
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+test_that("polr delta: cut with factor x1", {
+  fit <- suppressWarnings(polr(gear_o ~ am_f + wt + hp, data = d, method = "logistic"))
+  r <- post(fit, x1name = "am_f", x1vals = c("auto", "manual"), cut = 1,
+            method = "delta", digits = 4)
+  expect_false(any(is.na(r@est)))
+})
+
+# ── Delta method probabilities sum to 1 ──────────────────────────────
+
+test_that("polr delta probabilities sum to 1: logistic", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, method = "delta", digits = 8)
+  prob_sum <- sum(r@est[, 1])
+  expect_equal(prob_sum, 1.0, tolerance = 1e-10)
+})
+
+test_that("polr delta probabilities sum to 1: probit", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "probit")
+  r <- post(fit, method = "delta", digits = 8)
+  prob_sum <- sum(r@est[, 1])
+  expect_equal(prob_sum, 1.0, tolerance = 1e-10)
+})
+
+test_that("polr delta probabilities sum to 1: x1 only (each x1val)", {
+  fit <- polr(gear_o ~ wt + hp, data = d, method = "logistic")
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 10)
+  for (i in 1:2) {
+    prob_sum <- sum(r@est[i, 1, ])
+    expect_equal(prob_sum, 1.0, tolerance = 1e-8)
+  }
+})
+
+# ── Delta method: lm identity link is exact ───────────────────────────
+
+test_that("lm delta CIs match simulation exactly (identity link)", {
+  fit <- lm(mpg ~ wt + hp, data = d)
+  r <- post(fit, x1name = "wt", x1vals = c(2, 4), method = "delta", digits = 6)
+  set.seed(42)
+  s <- post(fit, x1name = "wt", x1vals = c(2, 4), n.sims = 100000, digits = 6)
+  expect_equal(r@est[1,1], s@est[1,1], tolerance = 0.01)
+  expect_equal(r@est[1,2], s@est[1,2], tolerance = 0.05)
+  expect_equal(r@est[1,3], s@est[1,3], tolerance = 0.05)
+})
+
 cat("\nAll tests passed!\n")

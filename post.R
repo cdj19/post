@@ -3,7 +3,7 @@
 setGeneric("post",
            function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
                     n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
-                    dist=c("normal","t")){
+                    dist=c("normal","t"), method=c("simulation","delta")){
              standardGeneric("post")
            }
 )
@@ -11,34 +11,43 @@ setGeneric("post",
 setClassUnion("arrayORNULL", c("array","NULL"))
 setClassUnion("listORcharacter", c("list","character"))
 
-setClass("post", 
-         slots = c(est = "array", 
-                   did = "arrayORNULL", 
-                   sims = "array", 
-                   model = "character", 
-                   link = "listORcharacter", 
-                   quantiles = "numeric", 
+setClass("post",
+         slots = c(est = "array",
+                   did = "arrayORNULL",
+                   sims = "arrayORNULL",
+                   model = "character",
+                   link = "listORcharacter",
+                   quantiles = "numeric",
                    call = "call")
 )
 
 
 post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
                      n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
-                     dist=c("normal","t")){
+                     dist=c("normal","t"), method=c("simulation","delta")){
 
   call <- match.call()
   dist <- match.arg(dist)
+  method <- match.arg(method)
 
-  sims <- postSim(model, n.sims=n.sims, dist=dist)
-  
+  if (method == "simulation") {
+    sims <- postSim(model, n.sims=n.sims, dist=dist)
+  }
+
   model.link <- family(model)$link
-  if (model.link=="identity"){link <- identity} 
+  if (model.link=="identity"){link <- identity}
   else if (model.link=="probit"){link <- pnorm}
   else if (model.link=="logit"){link <- plogis}
   else if (model.link=="log"){link <- exp}
   else if (model.link=="cloglog"){link <- function(x){1-exp(-exp(x))}}
   else {stop("Link function is not supported")}
-  
+
+  if (model.link=="identity"){link.deriv <- function(eta) rep(1, length(eta))}
+  else if (model.link=="probit"){link.deriv <- dnorm}
+  else if (model.link=="logit"){link.deriv <- dlogis}
+  else if (model.link=="log"){link.deriv <- exp}
+  else if (model.link=="cloglog"){link.deriv <- function(eta) exp(eta - exp(eta))}
+
   n.obs <- nrow(model.matrix(model))
   if (is.null(weights)){wi <- rep(1, n.obs)} else if (length(weights) != n.obs){
     stop("weights must have the same length as the estimation sample")
@@ -102,29 +111,48 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
       }
     }
     X <- aperm(model.matrix(terms(model), data=newdata, xlev=model$xlevels))
+
+    if (method == "delta") {
+      beta_hat <- coef(model)
+      non_aliased <- !is.na(beta_hat)
+      beta_hat[is.na(beta_hat)] <- 0
+      V <- vcov(model)
+      eta <- drop(beta_hat %*% X)
+      Q <- weighted.mean(link(eta), wi)
+      grad <- drop(X %*% (wi * link.deriv(eta))) / sum(wi)
+      se <- sqrt(drop(t(grad[non_aliased]) %*% V %*% grad[non_aliased]))
+      l2 <- array(NA, c(1,n.q+1))
+      l2[1,1] <- Q
+      l2[1,2:(n.q+1)] <- Q + qnorm(quantiles) * se
+      colnames(l2) <- c("mean",quantiles)
+      ans <- new("post", est=round(l2, digits=digits), did=NULL, sims=NULL,
+                 model=class(model), link=model.link, quantiles=quantiles, call=call)
+      return(ans)
+    }
+
     l1 <- array(NA, c(nrow(sims@coef),1))
     l1[,1] <- apply(link(sims@coef %*% X), 1, function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(1,n.q+1))
     l2[1,1] <- mean(l1)
     l2[1,2:(n.q+1)] <- quantile(l1, probs=quantiles)
     colnames(l2) <- c("mean",quantiles)
-    
-    ans <- new("post", 
+
+    ans <- new("post",
                est=round(l2, digits=digits),
                did=NULL,
-               sims=l1, 
-               model=class(model), 
-               link=model.link, 
-               quantiles=quantiles, 
+               sims=l1,
+               model=class(model),
+               link=model.link,
+               quantiles=quantiles,
                call=call)
     return(ans)
   }
   
   else if (is.null(x2name)){
-    
+
     n.x1 <- length(x1vals)
     X <- array(NA, c(n.obs,k,n.x1))
-    
+
     for (i in 1:(n.x1)){
       newdata <- data.frame(model$model)
       if (!is.null(holds)){
@@ -135,39 +163,70 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
       newdata[ ,x1name] <- x1vals[i]
       X[ , ,i] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
     }
-    
+
     X <- aperm(X, c(2,1,3))
+
+    if (method == "delta") {
+      beta_hat <- coef(model)
+      non_aliased <- !is.na(beta_hat)
+      beta_hat[is.na(beta_hat)] <- 0
+      V <- vcov(model)
+      l2 <- array(NA, c(n.x1+1,n.q+1))
+      grads <- array(NA, c(k,n.x1))
+      for (i in 1:n.x1) {
+        eta <- drop(beta_hat %*% X[,,i])
+        Q <- weighted.mean(link(eta), wi)
+        grad <- drop(X[,,i] %*% (wi * link.deriv(eta))) / sum(wi)
+        se <- sqrt(drop(t(grad[non_aliased]) %*% V %*% grad[non_aliased]))
+        l2[i,1] <- Q
+        l2[i,2:(n.q+1)] <- Q + qnorm(quantiles) * se
+        grads[,i] <- grad
+      }
+      fd_grad <- grads[,n.x1] - grads[,1]
+      fd_mean <- l2[n.x1,1] - l2[1,1]
+      fd_se <- sqrt(drop(t(fd_grad[non_aliased]) %*% V %*% fd_grad[non_aliased]))
+      l2[n.x1+1,1] <- fd_mean
+      l2[n.x1+1,2:(n.q+1)] <- fd_mean + qnorm(quantiles) * fd_se
+      rownames(l2) <- c(paste(c(rep(paste(x1name,"="),n.x1),
+                                paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),
+                              c(x1vals,"")))
+      colnames(l2) <- c("mean",quantiles)
+      ans <- new("post", est=round(l2, digits=digits), did=NULL, sims=NULL,
+                 model=class(model), link=model.link, quantiles=quantiles, call=call)
+      return(ans)
+    }
+
     l1 <- apply(apply(X, c(2,3), function(x) drop(link(sims@coef %*% x))), c(1,3), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1))
     l2[1:n.x1,1] <- apply(l1, 2, mean)
     q_arr <- apply(l1, 2, function(x) quantile(x, probs=quantiles))
     if (n.q == 1) q_arr <- array(q_arr, dim = c(1, length(q_arr)))
     l2[1:n.x1,2:(n.q+1)] <- aperm(q_arr)
-    
+
     l2[nrow(l2),1] <- mean(l1[ ,n.x1] - l1[ ,1])
     l2[nrow(l2),2:(n.q+1)] <- quantile(l1[ ,n.x1] - l1[ ,1], probs=quantiles)
     rownames(l2) <- c(paste(c(rep(paste(x1name,"="),n.x1),
                               paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),
-                            c(x1vals,"")))  
+                            c(x1vals,"")))
     colnames(l2) <- c("mean",quantiles)
-    
-    ans <- new("post", 
-               est=round(l2, digits=digits), 
-               did=NULL, 
-               sims=l1, 
-               model=class(model), 
-               link=model.link, 
-               quantiles=quantiles, 
+
+    ans <- new("post",
+               est=round(l2, digits=digits),
+               did=NULL,
+               sims=l1,
+               model=class(model),
+               link=model.link,
+               quantiles=quantiles,
                call=call)
     return(ans)
-  } 
+  }
   
   else{
-    
+
     n.x1 <- length(x1vals)
     n.x2 <- length(x2vals)
     X <- array(NA, c(n.obs,k,n.x1,n.x2))
-    
+
     for (j in 1:n.x2){
       for (i in 1:n.x1){
         newdata <- data.frame(model$model)
@@ -181,8 +240,50 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
         X[ , ,i,j] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       }
     }
-    
+
     X <- aperm(X, c(2,1,3,4))
+
+    if (method == "delta") {
+      beta_hat <- coef(model)
+      non_aliased <- !is.na(beta_hat)
+      beta_hat[is.na(beta_hat)] <- 0
+      V <- vcov(model)
+      l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
+      grads <- array(NA, c(k,n.x1,n.x2))
+      for (j in 1:n.x2) {
+        for (i in 1:n.x1) {
+          eta <- drop(beta_hat %*% X[,,i,j])
+          Q <- weighted.mean(link(eta), wi)
+          grad <- drop(X[,,i,j] %*% (wi * link.deriv(eta))) / sum(wi)
+          se <- sqrt(drop(t(grad[non_aliased]) %*% V %*% grad[non_aliased]))
+          l2[i,1,j] <- Q
+          l2[i,2:(n.q+1),j] <- Q + qnorm(quantiles) * se
+          grads[,i,j] <- grad
+        }
+        fd_grad <- grads[,n.x1,j] - grads[,1,j]
+        fd_mean <- l2[n.x1,1,j] - l2[1,1,j]
+        fd_se <- sqrt(drop(t(fd_grad[non_aliased]) %*% V %*% fd_grad[non_aliased]))
+        l2[n.x1+1,1,j] <- fd_mean
+        l2[n.x1+1,2:(n.q+1),j] <- fd_mean + qnorm(quantiles) * fd_se
+      }
+      dimnames(l2) <- list(paste(c(rep(paste(x1name,"="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
+                           c("mean",quantiles),
+                           paste(c(rep(paste(x2name,"="),n.x2)),c(x2vals)))
+      if (is.null(did)){did <- c(x2vals[1],x2vals[n.x2])} else{did <- did}
+      did_grad <- (grads[,n.x1,match(did[2],x2vals)] - grads[,1,match(did[2],x2vals)]) -
+                  (grads[,n.x1,match(did[1],x2vals)] - grads[,1,match(did[1],x2vals)])
+      did_mean <- (l2[n.x1,1,match(did[2],x2vals)] - l2[1,1,match(did[2],x2vals)]) -
+                  (l2[n.x1,1,match(did[1],x2vals)] - l2[1,1,match(did[1],x2vals)])
+      did_se <- sqrt(drop(t(did_grad[non_aliased]) %*% V %*% did_grad[non_aliased]))
+      l3 <- array(NA, c(1,n.q+1))
+      l3[1,1] <- did_mean
+      l3[1,2:(n.q+1)] <- did_mean + qnorm(quantiles) * did_se
+      dimnames(l3) <- list("did",c("mean",quantiles))
+      ans <- new("post", est=round(l2, digits=digits), did=round(l3, digits=digits),
+                 sims=NULL, model=class(model), link=model.link, quantiles=quantiles, call=call)
+      return(ans)
+    }
+
     l1 <- apply(apply(X, c(2,3,4), function(x) drop(link(sims@coef %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
     l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
     l2[1:n.x1,1,1:n.x2] <- apply(l1,c(2,3),mean)
@@ -195,20 +296,20 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
                          c("mean",quantiles),
                          paste(c(rep(paste(x2name,"="),n.x2)),
                                c(x2vals)))
-    
+
     if (is.null(did)){did <- c(x2vals[1],x2vals[n.x2])} else{did <- did}
     l3 <- array(NA, c(1,n.q+1))
     l3[1,1] <- mean((l1[ ,n.x1,match(did[2],x2vals)] - l1[ ,1,match(did[2],x2vals)]) -  (l1[ ,n.x1,match(did[1],x2vals)] - l1[ ,1,match(did[1],x2vals)]))
     l3[1,2:(n.q+1)] <- quantile((l1[ ,n.x1,match(did[2],x2vals)] - l1[ ,1,match(did[2],x2vals)]) -  (l1[ ,n.x1,match(did[1],x2vals)] - l1[ ,1,match(did[1],x2vals)]), probs=quantiles)
-    dimnames(l3) <- list("did",c("mean",quantiles)) 
-    
-    ans <- new("post", 
-               est=round(l2, digits=digits), 
-               did=round(l3, digits=digits), 
-               sims=l1, 
-               model=class(model), 
-               link=model.link, 
-               quantiles=quantiles, 
+    dimnames(l3) <- list("did",c("mean",quantiles))
+
+    ans <- new("post",
+               est=round(l2, digits=digits),
+               did=round(l3, digits=digits),
+               sims=l1,
+               model=class(model),
+               link=model.link,
+               quantiles=quantiles,
                call=call)
     return(ans)
   }
@@ -217,32 +318,38 @@ post.glm <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds
 
 post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,holds=NULL,
          n.sims=1000,cut=NULL,quantiles=c(.025,.975),did=NULL,weights=NULL, digits=2,
-         dist=c("normal","t")){
+         dist=c("normal","t"), method=c("simulation","delta")){
 
   call <- match.call()
   dist <- match.arg(dist)
+  method <- match.arg(method)
 
-  sims <- suppressMessages(postSim(model, n.sims=n.sims, dist=dist))
-  
+  if (method == "simulation") {
+    sims <- suppressMessages(postSim(model, n.sims=n.sims, dist=dist))
+  }
+
   n.obs <- length(model$model[,1])
   if (is.null(weights)){wi <- rep(1, n.obs)} else if (length(weights) != n.obs){
     stop("weights must have the same length as the estimation sample")
   } else{wi <- weights}
-  
-  if (model$method=="probit"){link <- pnorm}
-  else if (model$method=="logistic"){link <- plogis}
-  else if (model$method=="cloglog"){link <- function(x){1-exp(-exp(x))}}
+
+  if (model$method=="probit"){link <- pnorm; link.deriv <- dnorm}
+  else if (model$method=="logistic"){link <- plogis; link.deriv <- dlogis}
+  else if (model$method=="cloglog"){link <- function(x){1-exp(-exp(x))}; link.deriv <- function(x) exp(x - exp(x))}
   else {stop("Link function is not supported")}
-  
+
   k <- ncol(model.matrix(terms(model), data=model$model, xlev=model$xlevels))
   n.q <- length(quantiles)
   n.y <- length(levels(model$model[,1]))
   n.z <- length(model$zeta)
-  tau <- array(NA, c(n.sims,n.z+2))
-  tau[,1] <- -Inf
-  tau[,2:(ncol(tau)-1)] <- sims@zeta[,1:n.z]
-  tau[,ncol(tau)] <- Inf
-  beta <- sims@coef
+
+  if (method == "simulation") {
+    tau <- array(NA, c(n.sims,n.z+2))
+    tau[,1] <- -Inf
+    tau[,2:(ncol(tau)-1)] <- sims@zeta[,1:n.z]
+    tau[,ncol(tau)] <- Inf
+    beta <- sims@coef
+  }
 
   if (!is.null(x1name) && !x1name %in% names(model$model)) {
     stop(sprintf("x1name='%s' is not a variable in the model", x1name))
@@ -307,7 +414,38 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       X_temp[ , ] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       X[ , ] <- X_temp[,-1]
       X <- aperm(X)
-      
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        tau_hat <- c(-Inf, zeta_hat, Inf)
+        eta <- drop(beta_hat %*% X)
+        l3 <- array(NA, c(n.y, n.q+1))
+        for (z in 1:n.y) {
+          upper <- tau_hat[z+1]
+          lower <- tau_hat[z]
+          p_upper <- if (is.finite(upper)) link(upper - eta) else rep(1, n.obs)
+          p_lower <- if (is.finite(lower)) link(lower - eta) else rep(0, n.obs)
+          Q <- weighted.mean(p_upper - p_lower, wi)
+          d_upper <- if (is.finite(upper)) link.deriv(upper - eta) else rep(0, n.obs)
+          d_lower <- if (is.finite(lower)) link.deriv(lower - eta) else rep(0, n.obs)
+          grad_beta <- drop(X %*% (wi * (-d_upper + d_lower))) / sum(wi)
+          grad_zeta <- rep(0, n.z)
+          if (z <= n.z) grad_zeta[z] <- sum(wi * d_upper) / sum(wi)
+          if (z >= 2) grad_zeta[z-1] <- grad_zeta[z-1] - sum(wi * d_lower) / sum(wi)
+          grad <- c(grad_beta, grad_zeta)
+          se <- sqrt(drop(t(grad) %*% V %*% grad))
+          l3[z,1] <- Q
+          l3[z,2:(n.q+1)] <- Q + qnorm(quantiles) * se
+        }
+        rownames(l3) <- paste("Y =", levels(model$model[,1]))
+        colnames(l3) <- c("mean", quantiles)
+        ans <- new("post", est=round(l3, digits=digits), did=NULL, sims=NULL,
+                   model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
       l1 <- array(NA, c(n.sims, n.obs, n.y))
       for (z in 1:n.y){
         l1[,,z] <- link(tau[,z+1] - beta %*% X) - link(tau[,z] - beta %*% X)
@@ -352,8 +490,51 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
         X[ , ,i] <- X_temp[,-1,i]
       }
       
-      l1 <- array(NA, c(n.sims, n.obs, n.x1, n.y))
       X <- aperm(X, c(2,1,3))
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        tau_hat <- c(-Inf, zeta_hat, Inf)
+        n_params <- length(beta_hat) + n.z
+        l3 <- array(NA, c(n.x1+1, n.q+1, n.y))
+        grads <- array(NA, c(n_params, n.x1, n.y))
+        for (z in 1:n.y) {
+          upper <- tau_hat[z+1]
+          lower <- tau_hat[z]
+          for (i in 1:n.x1) {
+            eta <- drop(beta_hat %*% X[,,i])
+            p_upper <- if (is.finite(upper)) link(upper - eta) else rep(1, n.obs)
+            p_lower <- if (is.finite(lower)) link(lower - eta) else rep(0, n.obs)
+            Q <- weighted.mean(p_upper - p_lower, wi)
+            d_upper <- if (is.finite(upper)) link.deriv(upper - eta) else rep(0, n.obs)
+            d_lower <- if (is.finite(lower)) link.deriv(lower - eta) else rep(0, n.obs)
+            grad_beta <- drop(X[,,i] %*% (wi * (-d_upper + d_lower))) / sum(wi)
+            grad_zeta <- rep(0, n.z)
+            if (z <= n.z) grad_zeta[z] <- sum(wi * d_upper) / sum(wi)
+            if (z >= 2) grad_zeta[z-1] <- grad_zeta[z-1] - sum(wi * d_lower) / sum(wi)
+            grad <- c(grad_beta, grad_zeta)
+            se <- sqrt(drop(t(grad) %*% V %*% grad))
+            l3[i,1,z] <- Q
+            l3[i,2:(n.q+1),z] <- Q + qnorm(quantiles) * se
+            grads[,i,z] <- grad
+          }
+          fd_grad <- grads[,n.x1,z] - grads[,1,z]
+          fd_mean <- l3[n.x1,1,z] - l3[1,1,z]
+          fd_se <- sqrt(drop(t(fd_grad) %*% V %*% fd_grad))
+          l3[n.x1+1,1,z] <- fd_mean
+          l3[n.x1+1,2:(n.q+1),z] <- fd_mean + qnorm(quantiles) * fd_se
+        }
+        dimnames(l3) <- list(paste(c(rep(paste(x1name,"="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
+                             c("mean",quantiles),
+                             paste("Y =", levels(model$model[,1])))
+        ans <- new("post", est=round(l3, digits=digits), did=NULL, sims=NULL,
+                   model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
+      l1 <- array(NA, c(n.sims, n.obs, n.x1, n.y))
       for (z in 1:n.y){
         l1[,,,z] <- apply(X, c(2,3), function(x) drop(link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
       }
@@ -407,7 +588,64 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3,4))
-      
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        tau_hat <- c(-Inf, zeta_hat, Inf)
+        n_params <- length(beta_hat) + n.z
+        l3 <- array(NA, c(n.x1+1, n.q+1, n.x2, n.y))
+        grads <- array(NA, c(n_params, n.x1, n.x2, n.y))
+        for (m in 1:n.y) {
+          upper <- tau_hat[m+1]
+          lower <- tau_hat[m]
+          for (j in 1:n.x2) {
+            for (i in 1:n.x1) {
+              eta <- drop(beta_hat %*% X[,,i,j])
+              p_upper <- if (is.finite(upper)) link(upper - eta) else rep(1, n.obs)
+              p_lower <- if (is.finite(lower)) link(lower - eta) else rep(0, n.obs)
+              Q <- weighted.mean(p_upper - p_lower, wi)
+              d_upper <- if (is.finite(upper)) link.deriv(upper - eta) else rep(0, n.obs)
+              d_lower <- if (is.finite(lower)) link.deriv(lower - eta) else rep(0, n.obs)
+              grad_beta <- drop(X[,,i,j] %*% (wi * (-d_upper + d_lower))) / sum(wi)
+              grad_zeta <- rep(0, n.z)
+              if (m <= n.z) grad_zeta[m] <- sum(wi * d_upper) / sum(wi)
+              if (m >= 2) grad_zeta[m-1] <- grad_zeta[m-1] - sum(wi * d_lower) / sum(wi)
+              grad <- c(grad_beta, grad_zeta)
+              se <- sqrt(drop(t(grad) %*% V %*% grad))
+              l3[i,1,j,m] <- Q
+              l3[i,2:(n.q+1),j,m] <- Q + qnorm(quantiles) * se
+              grads[,i,j,m] <- grad
+            }
+            fd_grad <- grads[,n.x1,j,m] - grads[,1,j,m]
+            fd_mean <- l3[n.x1,1,j,m] - l3[1,1,j,m]
+            fd_se <- sqrt(drop(t(fd_grad) %*% V %*% fd_grad))
+            l3[n.x1+1,1,j,m] <- fd_mean
+            l3[n.x1+1,2:(n.q+1),j,m] <- fd_mean + qnorm(quantiles) * fd_se
+          }
+        }
+        dimnames(l3) <- list(paste(c(rep(paste(x1name," ="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
+                             c("mean",quantiles),
+                             paste(c(rep(paste(x2name,"="),n.x2)),x2vals),
+                             paste("Y =", levels(model$model[,1])))
+        if (is.null(did)){did <- c(x2vals[1],x2vals[n.x2])} else{did <- did}
+        l4 <- array(NA, c(n.y, n.q+1))
+        for (i in 1:n.y) {
+          did_grad <- (grads[,n.x1,match(did[2],x2vals),i] - grads[,1,match(did[2],x2vals),i]) -
+                      (grads[,n.x1,match(did[1],x2vals),i] - grads[,1,match(did[1],x2vals),i])
+          did_mean <- (l3[n.x1,1,match(did[2],x2vals),i] - l3[1,1,match(did[2],x2vals),i]) -
+                      (l3[n.x1,1,match(did[1],x2vals),i] - l3[1,1,match(did[1],x2vals),i])
+          did_se <- sqrt(drop(t(did_grad) %*% V %*% did_grad))
+          l4[i,1] <- did_mean
+          l4[i,2:(n.q+1)] <- did_mean + qnorm(quantiles) * did_se
+        }
+        dimnames(l4) <- list(paste("Y =", levels(model$model[,1])), c("mean", quantiles))
+        ans <- new("post", est=round(l3, digits=digits), did=round(l4, digits=digits),
+                   sims=NULL, model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
       l1 <- array(NA, c(n.sims, n.obs, n.x1, n.x2, n.y))
       for (z in 1:n.y){
         l1[,,,,z] <- apply(X, c(2,3,4), function(x) drop(link(tau[,z+1] - beta %*% x) - link(tau[,z] - beta %*% x)))
@@ -466,7 +704,29 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       X_temp[ , ] <- model.matrix(terms(model), data=newdata, xlev=model$xlevels)
       X[ , ] <- X_temp[,-1]
       X <- aperm(X)
-      
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        zeta_c <- zeta_hat[cut]
+        eta <- drop(beta_hat %*% X)
+        Q <- weighted.mean(1 - link(zeta_c - eta), wi)
+        d <- link.deriv(zeta_c - eta)
+        grad_beta <- drop(X %*% (wi * d)) / sum(wi)
+        grad_zeta <- rep(0, n.z)
+        grad_zeta[cut] <- -sum(wi * d) / sum(wi)
+        grad <- c(grad_beta, grad_zeta)
+        se <- sqrt(drop(t(grad) %*% V %*% grad))
+        l2 <- array(NA, c(1, n.q+1))
+        l2[1,1] <- Q
+        l2[1,2:(n.q+1)] <- Q + qnorm(quantiles) * se
+        colnames(l2) <- c("mean", quantiles)
+        ans <- new("post", est=round(l2, digits=digits), did=NULL, sims=NULL,
+                   model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
       l1 <- apply(1 - link(tau[,cut+1] - beta %*% X), 1, function(x) weighted.mean(x, wi))
       l1 <- array(l1, dim = c(length(l1), 1))
       l2 <- array(NA, c(1,n.q+1))
@@ -506,6 +766,42 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3))
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        zeta_c <- zeta_hat[cut]
+        n_params <- length(beta_hat) + n.z
+        l2 <- array(NA, c(n.x1+1, n.q+1))
+        grads <- matrix(NA, n_params, n.x1)
+        for (i in 1:n.x1) {
+          eta <- drop(beta_hat %*% X[,,i])
+          Q <- weighted.mean(1 - link(zeta_c - eta), wi)
+          d <- link.deriv(zeta_c - eta)
+          grad_beta <- drop(X[,,i] %*% (wi * d)) / sum(wi)
+          grad_zeta <- rep(0, n.z)
+          grad_zeta[cut] <- -sum(wi * d) / sum(wi)
+          grad <- c(grad_beta, grad_zeta)
+          se <- sqrt(drop(t(grad) %*% V %*% grad))
+          l2[i,1] <- Q
+          l2[i,2:(n.q+1)] <- Q + qnorm(quantiles) * se
+          grads[,i] <- grad
+        }
+        fd_grad <- grads[,n.x1] - grads[,1]
+        fd_mean <- l2[n.x1,1] - l2[1,1]
+        fd_se <- sqrt(drop(t(fd_grad) %*% V %*% fd_grad))
+        l2[n.x1+1,1] <- fd_mean
+        l2[n.x1+1,2:(n.q+1)] <- fd_mean + qnorm(quantiles) * fd_se
+        rownames(l2) <- c(paste(c(rep(paste(x1name,"="),n.x1),
+                                  paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),
+                                c(x1vals,"")))
+        colnames(l2) <- c("mean", quantiles)
+        ans <- new("post", est=round(l2, digits=digits), did=NULL, sims=NULL,
+                   model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
       l1 <- apply(apply(X, c(2,3), function(x) drop(1 - link(tau[,cut+1] - beta %*% x))),
                   c(1,3), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1))
@@ -555,6 +851,53 @@ post.polr <- function(model,x1name=NULL,x1vals=NULL,x2name=NULL,x2vals=NULL,hold
       }
       
       X <- aperm(X, c(2,1,3,4))
+
+      if (method == "delta") {
+        beta_hat <- model$coefficients
+        zeta_hat <- model$zeta
+        V <- vcov(model)
+        zeta_c <- zeta_hat[cut]
+        n_params <- length(beta_hat) + n.z
+        l2 <- array(NA, c(n.x1+1, n.q+1, n.x2))
+        grads <- array(NA, c(n_params, n.x1, n.x2))
+        for (j in 1:n.x2) {
+          for (i in 1:n.x1) {
+            eta <- drop(beta_hat %*% X[,,i,j])
+            Q <- weighted.mean(1 - link(zeta_c - eta), wi)
+            d <- link.deriv(zeta_c - eta)
+            grad_beta <- drop(X[,,i,j] %*% (wi * d)) / sum(wi)
+            grad_zeta <- rep(0, n.z)
+            grad_zeta[cut] <- -sum(wi * d) / sum(wi)
+            grad <- c(grad_beta, grad_zeta)
+            se <- sqrt(drop(t(grad) %*% V %*% grad))
+            l2[i,1,j] <- Q
+            l2[i,2:(n.q+1),j] <- Q + qnorm(quantiles) * se
+            grads[,i,j] <- grad
+          }
+          fd_grad <- grads[,n.x1,j] - grads[,1,j]
+          fd_mean <- l2[n.x1,1,j] - l2[1,1,j]
+          fd_se <- sqrt(drop(t(fd_grad) %*% V %*% fd_grad))
+          l2[n.x1+1,1,j] <- fd_mean
+          l2[n.x1+1,2:(n.q+1),j] <- fd_mean + qnorm(quantiles) * fd_se
+        }
+        dimnames(l2) <- list(paste(c(rep(paste(x1name," ="),n.x1),paste("\u0394","(",x1vals[1],",",x1vals[length(x1vals)],")")),c(x1vals,"")),
+                             c("mean",quantiles),
+                             paste(c(rep(paste(x2name," ="),n.x2)),c(x2vals)))
+        if (is.null(did)){did <- c(x2vals[1],x2vals[n.x2])} else{did <- did}
+        did_grad <- (grads[,n.x1,match(did[2],x2vals)] - grads[,1,match(did[2],x2vals)]) -
+                    (grads[,n.x1,match(did[1],x2vals)] - grads[,1,match(did[1],x2vals)])
+        did_mean <- (l2[n.x1,1,match(did[2],x2vals)] - l2[1,1,match(did[2],x2vals)]) -
+                    (l2[n.x1,1,match(did[1],x2vals)] - l2[1,1,match(did[1],x2vals)])
+        did_se <- sqrt(drop(t(did_grad) %*% V %*% did_grad))
+        l3 <- array(NA, c(1, n.q+1))
+        l3[1,1] <- did_mean
+        l3[1,2:(n.q+1)] <- did_mean + qnorm(quantiles) * did_se
+        dimnames(l3) <- list("did", c("mean", quantiles))
+        ans <- new("post", est=round(l2, digits=digits), did=round(l3, digits=digits),
+                   sims=NULL, model=class(model), link=model$method, quantiles=quantiles, call=call)
+        return(ans)
+      }
+
       l1 <- apply(apply(X, c(2,3,4), function(x) drop(1 - link(tau[,cut+1] - beta %*% x))), c(1,3,4), function(x) weighted.mean(x, wi))
       l2 <- array(NA, c(n.x1+1,n.q+1,n.x2))
       for (j in 1:n.x2){
